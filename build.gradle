@@ -1,0 +1,17 @@
+
+apply plugin: 'java'
+
+repositories {
+    jcenter()
+}
+
+dependencies {
+    compile 'org.slf4j:slf4j-api:1.7.7'
+    compile 'org.apache.flume:flume-ng-sdk:1.5.0'
+    compile 'org.apache.flume:flume-ng-core:1.5.0'
+    compile 'org.apache.flume:flume-ng-configuration:1.5.0'
+    compile 'net.openhft:chronicle:3.3.4'
+
+    testCompile 'junit:junit:4.11'
+    testCompile 'org.slf4j:slf4j-log4j12:1.7.7'
+}
