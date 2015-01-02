@@ -105,15 +105,16 @@ public class ChronicleChannel extends BasicChannelSemantics {
     }
 
     private static class ChronicleChannelTransaction extends BasicTransactionSemantics {
-        private final Chronicle chronicle;
-        private final ChroniclePosition position;
+        private final ResizingLongArray indexes = new ResizingLongArray(64);
 
+        private final Chronicle chronicle;
+
+        private final ChroniclePosition position;
         private TransactionType type = TransactionType.NONE;
         private ExcerptAppender appender;
-        private List<Event> appendEvents = new ArrayList<Event>();
 
+        private List<Event> appendEvents = new ArrayList<Event>();
         private ExcerptTailer tailer;
-        private List<Long> takenIndexes = new ArrayList<Long>();
 
         public ChronicleChannelTransaction(Chronicle chronicle, ChroniclePosition position) {
             this.chronicle = chronicle;
@@ -142,7 +143,7 @@ public class ChronicleChannel extends BasicChannelSemantics {
             while (tailer.nextIndex()) {
                 if (tailer.compareAndSwapInt(0L, 0, threadId)) {
                     tailer.position(4); // skip the lock field
-                    takenIndexes.add(tailer.index());
+                    indexes.add(tailer.index());
                     return EventBytes.readFrom(tailer);
                 }
             }
@@ -177,7 +178,9 @@ public class ChronicleChannel extends BasicChannelSemantics {
             do {
                 current = position.get();
                 update = current;
-                for (Long index : takenIndexes) {
+
+                for (int i = 0; i < indexes.size(); i ++) {
+                    long index = indexes.get(i);
                     if (sequentialIndexFrom(update, index)) {
                         update = index;
                     }
@@ -194,6 +197,9 @@ public class ChronicleChannel extends BasicChannelSemantics {
         }
 
         private boolean sequentialIndexFrom(long from, long to) {
+            if ((from + 1) == to) {
+                return true;
+            }
             // todo complete this sequentialIndexFrom function...
             return true;
         }
