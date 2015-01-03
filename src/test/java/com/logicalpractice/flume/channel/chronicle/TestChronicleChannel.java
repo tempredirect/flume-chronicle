@@ -1,6 +1,7 @@
 package com.logicalpractice.flume.channel.chronicle;
 
 import com.google.common.base.Charsets;
+import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.io.Files;
 import com.logicalpractice.flume.channel.chronicle.ChronicleChannel;
@@ -14,12 +15,17 @@ import org.junit.Before;
 import org.junit.Test;
 
 import java.io.File;
+import java.util.Arrays;
+import java.util.List;
+import java.util.concurrent.*;
 
 import static org.junit.Assert.*;
 
 public class TestChronicleChannel {
 
     ChronicleChannel testObject;
+
+    ExecutorService executor = Executors.newCachedThreadPool();
 
     @Before
     public void setUp() throws Exception {
@@ -32,6 +38,7 @@ public class TestChronicleChannel {
 
     @After
     public void tearDown() throws Exception {
+        executor.shutdownNow();
         if (testObject.getLifecycleState() == LifecycleState.START) {
             testObject.stop();
         }
@@ -105,6 +112,31 @@ public class TestChronicleChannel {
         assertEquals(initial + 1, testObject.getPosition().get());
     }
 
+    @Test
+    public void testEventsInOpenTransactionShouldNotBeVisible() throws Exception {
+        testObject.start();
+        checkCompleted(executor.invokeAll(Arrays.<Callable<Void>>asList(
+                new Put(EventBuilder.withBody("was not committed", Charsets.UTF_8)),
+                new PutWithCommit(EventBuilder.withBody("committed", Charsets.UTF_8))
+        )));
+
+        begin();
+        Event next = testObject.take();
+        assertNotNull("Unexpected null event, the channel should have one event available", next);
+        assertEquals("Unexpected event message, only the 'committed' event should be visible",
+                "committed", new String(next.getBody(), Charsets.UTF_8));
+
+        next = testObject.take();
+        assertNull("Unexpected event, the channel should now only have one event visible", next);
+
+        commitAndClose();
+
+        begin();
+        next = testObject.take();
+        assertNull("Unexpected event, the channel should now only have one event visible", next);
+        commitAndClose();
+    }
+
     private void commitAndClose() {
         testObject.getTransaction().commit();
         testObject.getTransaction().close();
@@ -112,6 +144,47 @@ public class TestChronicleChannel {
 
     private void begin() {
         testObject.getTransaction().begin();
+    }
+
+    private void checkCompleted(List<Future<Void>> futures) {
+        for (Future<Void> future : futures) {
+            try {
+                future.get();
+            } catch (InterruptedException e) {
+                throw new AssertionError(e);
+            } catch (ExecutionException e) {
+                throw Throwables.propagate(e.getCause());
+            }
+        }
+    }
+
+
+    private class Put implements Callable<Void> {
+        private final Event event;
+
+        public Put(Event event) {
+            this.event = event;
+        }
+
+        @Override
+        public Void call() {
+            begin();
+            testObject.put(event);
+            return null;
+        }
+    }
+
+    public class PutWithCommit extends Put {
+        public PutWithCommit(Event event) {
+            super(event);
+        }
+
+        @Override
+        public Void call() {
+            super.call();
+            commitAndClose();
+            return null;
+        }
     }
 
 

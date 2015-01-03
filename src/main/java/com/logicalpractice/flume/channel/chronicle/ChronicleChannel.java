@@ -225,8 +225,18 @@ public class ChronicleChannel extends BasicChannelSemantics {
             if ((from + 1) == to) {
                 return true;
             }
-            // todo complete this sequentialIndexFrom function...
-            return true;
+            try (ExcerptTailer tmpTailer = chronicle.createTailer()) {
+                if (tmpTailer.index(from)) {
+                    // only if 'from' is valid and the nextIndex is
+                    // the 'to'
+                    return tmpTailer.nextIndex() && tmpTailer.index() == to;
+                }
+                // from isn't valid then 'to' could be the first element?
+                tmpTailer.toStart();
+                return tmpTailer.nextIndex() && tmpTailer.index() == to;
+            } catch (IOException e) {
+                throw new ChannelException("unable to create tmp tailer", e);
+            }
         }
 
         @Override
