@@ -124,14 +124,15 @@ public class ChronicleChannel extends BasicChannelSemantics {
         @Override
         protected void doPut(Event event) throws InterruptedException {
             becomeTransactionType(TransactionType.PUT);
-            if (appender == null) {
-                try {
-                    appender = chronicle.createAppender();
-                } catch (IOException e) {
-                    throw new ChannelException("unable to create new Appender", e);
-                }
-            }
-            appendEvents.add(event);
+            initialiseAppenderIfRequired();
+
+            appender.startExcerpt(4 + EventBytes.sizeOf(event));
+
+            appender.writeInt(-AffinitySupport.getThreadId()); // initial value for the lock is a neg number
+                                                               // this will be zero'd in the commit phase
+            EventBytes.writeTo(appender, event);
+            appender.finish();
+            indexes.add(appender.lastWrittenIndex());
         }
 
         @Override
@@ -161,6 +162,16 @@ public class ChronicleChannel extends BasicChannelSemantics {
             }
         }
 
+        private void initialiseAppenderIfRequired() {
+            if (appender == null) {
+                try {
+                    appender = chronicle.createAppender();
+                } catch (IOException e) {
+                    throw new ChannelException("unable to create new Appender", e);
+                }
+            }
+        }
+
         @Override
         protected void doCommit() throws InterruptedException {
             switch (type) {
@@ -170,6 +181,19 @@ public class ChronicleChannel extends BasicChannelSemantics {
                 case TAKE:
                     doTakeCommit();
                     break;
+            }
+        }
+
+        private void doPutCommit() {
+            try (ExcerptTailer tailer = chronicle.createTailer()) {
+                for (int i = 0; i < indexes.size(); i ++) {
+                    long index = indexes.get(i);
+                    if (tailer.index(index)) {
+                        tailer.writeOrderedInt(0L, 0);
+                    }
+                }
+            } catch (IOException e) {
+                throw new ChannelException("unable to initialise a Tailer", e);
             }
         }
 
@@ -202,15 +226,6 @@ public class ChronicleChannel extends BasicChannelSemantics {
             }
             // todo complete this sequentialIndexFrom function...
             return true;
-        }
-
-        private void doPutCommit() {
-            for (Event event : appendEvents) {
-                appender.startExcerpt();
-                appender.writeInt(0); //
-                EventBytes.writeTo(appender, event);
-                appender.finish();
-            }
         }
 
         @Override

@@ -1,5 +1,6 @@
 package com.logicalpractice.flume.channel.chronicle;
 
+import net.openhft.lang.io.AbstractBytes;
 import net.openhft.lang.io.Bytes;
 import org.apache.flume.Event;
 import org.apache.flume.event.EventBuilder;
@@ -11,6 +12,18 @@ import java.util.Map;
  *
  */
 public class EventBytes {
+
+    public static int sizeOf(Event event) {
+        int size = 2; // short header
+        for (Map.Entry<String, String> entry : event.getHeaders().entrySet()) {
+            size += 4; // 2 * 2 length fields
+            size += AbstractBytes.findUTFLength(entry.getKey(), entry.getKey().length());
+            size += AbstractBytes.findUTFLength(entry.getValue(), entry.getValue().length());
+        }
+        size += 4;
+        size += event.getBody().length;
+        return size;
+    }
 
     public static void writeTo(Bytes out, Event event) {
         Map<String, String> headers = event.getHeaders();
