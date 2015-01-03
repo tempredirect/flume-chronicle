@@ -12,7 +12,8 @@ import org.apache.flume.event.EventBuilder;
 import org.apache.flume.lifecycle.LifecycleState;
 import org.junit.After;
 import org.junit.Before;
-import org.junit.Test;
+import org.junit.Test
+import spock.lang.Specification;
 
 import java.io.File;
 import java.util.Arrays;
@@ -21,14 +22,13 @@ import java.util.concurrent.*;
 
 import static org.junit.Assert.*;
 
-public class TestChronicleChannel {
+public class ChronicleChannelSpec extends Specification {
 
     ChronicleChannel testObject;
 
     ExecutorService executor = Executors.newCachedThreadPool();
 
-    @Before
-    public void setUp() throws Exception {
+    def setup() throws Exception {
         File tempDir = Files.createTempDir();
         testObject = new ChronicleChannel();
         testObject.configure(new Context(ImmutableMap.of(
@@ -36,29 +36,29 @@ public class TestChronicleChannel {
         )));
     }
 
-    @After
-    public void tearDown() throws Exception {
+    def cleanup() {
         executor.shutdownNow();
         if (testObject.getLifecycleState() == LifecycleState.START) {
             testObject.stop();
         }
     }
 
-    @Test
-    public void testStart() throws Exception {
+    def "start works"() throws Exception {
+        when:
         testObject.start();
 
-        assertEquals("Unexpected lifecycle state after start()",
-                LifecycleState.START, testObject.getLifecycleState());
+        then:
+        testObject.getLifecycleState() == LifecycleState.START
     }
 
-    @Test
-    public void testPutAndTakeSingleEvent() throws Exception {
+    def "Put and Take Single Event"() throws Exception {
+        given:
         Event input = EventBuilder.withBody("This is a Message", Charsets.UTF_8,
                 ImmutableMap.of("header1", "value1", "header2", "value2"));
 
         testObject.start();
 
+        when:
         // perform write
         begin();
         testObject.put(input);
@@ -69,22 +69,20 @@ public class TestChronicleChannel {
         Event result = testObject.take();
         commitAndClose();
 
+        then:
         // check the results
-        assertNotNull("Unexpected null event from the channel:", result);
-        assertEquals("Unexpected difference between the event headers written and read",
-                input.getHeaders(),
-                result.getHeaders());
+        result != null
+        input.getHeaders() == result.getHeaders()
 
-        assertArrayEquals("Unexpected difference between the event body written and read",
-                input.getBody(),
-                result.getBody());
+        Arrays.equals(input.getBody(), result.getBody());
     }
 
-    @Test
-    public void testPutAndTakeMultipleTransactions() throws Exception {
-
+    def "Put And Take Multiple Transactions"() throws Exception {
+        given:
         testObject.start();
         long initial = testObject.getPosition().get();
+
+        when:
         // perform writes
         for (int i = 0; i < 10; i++) {
             begin();
@@ -101,7 +99,10 @@ public class TestChronicleChannel {
         testObject.take();
         commitAndClose();
 
-        assertTrue(initial != testObject.getPosition().get());
+        then:
+        initial != testObject.getPosition().get()
+
+        when:
         initial = testObject.getPosition().get();
 
         // read another
@@ -109,31 +110,44 @@ public class TestChronicleChannel {
         testObject.take();
         commitAndClose();
 
-        assertEquals(initial + 1, testObject.getPosition().get());
+        then:
+        initial + 1 == testObject.getPosition().get()
     }
 
-    @Test
-    public void testEventsInOpenTransactionShouldNotBeVisible() throws Exception {
+    def "Events In Open Transaction are not visible"() throws Exception {
+        given:
         testObject.start();
         checkCompleted(executor.invokeAll(Arrays.<Callable<Void>>asList(
                 new Put(EventBuilder.withBody("was not committed", Charsets.UTF_8)),
                 new PutWithCommit(EventBuilder.withBody("committed", Charsets.UTF_8))
         )));
 
+        when:
         begin();
         Event next = testObject.take();
-        assertNotNull("Unexpected null event, the channel should have one event available", next);
-        assertEquals("Unexpected event message, only the 'committed' event should be visible",
-                "committed", new String(next.getBody(), Charsets.UTF_8));
 
+        then: "the channel should have one event available"
+        next != null
+        and: "only the 'committed' event should be visible"
+        "committed" == new String(next.getBody(), Charsets.UTF_8)
+
+        when:
         next = testObject.take();
-        assertNull("Unexpected event, the channel should now only have one event visible", next);
 
+        then: "the channel should now only have one event visible"
+
+        next == null
+
+        when: "we commit the txn and start again"
         commitAndClose();
 
         begin();
         next = testObject.take();
-        assertNull("Unexpected event, the channel should now only have one event visible", next);
+
+        then: "there should still no more events"
+        next == null
+
+        cleanup:
         commitAndClose();
     }
 
