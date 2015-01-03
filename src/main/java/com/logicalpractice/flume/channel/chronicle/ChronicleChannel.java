@@ -24,6 +24,7 @@ import net.openhft.chronicle.Chronicle;
 import net.openhft.chronicle.ChronicleQueueBuilder;
 import net.openhft.chronicle.ExcerptAppender;
 import net.openhft.chronicle.ExcerptTailer;
+import org.apache.commons.io.IOUtils;
 import org.apache.flume.ChannelException;
 import org.apache.flume.Context;
 import org.apache.flume.Event;
@@ -210,6 +211,18 @@ public class ChronicleChannel extends BasicChannelSemantics {
         @Override
         protected void doRollback() throws InterruptedException {
             throw new UnsupportedOperationException("not implemented yet");
+        }
+
+        @Override
+        protected void doClose() {
+            if (appender != null) {
+                appender.close();
+                appender = null;
+            }
+            if (tailer != null) {
+                tailer.close();
+                tailer = null;
+            }
         }
     }
 }
