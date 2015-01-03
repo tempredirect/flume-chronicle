@@ -185,6 +185,18 @@ public class ChronicleChannel extends BasicChannelSemantics {
             }
         }
 
+        @Override
+        protected void doRollback() throws InterruptedException {
+            switch(type) {
+                case PUT:
+                    doTakeCommit();
+                    break;
+                case TAKE:
+                    doPutCommit();
+                    break;
+            }
+        }
+
         private void doPutCommit() {
             try (ExcerptTailer tailer = chronicle.createTailer()) {
                 for (int i = 0; i < indexes.size(); i ++) {
@@ -237,11 +249,6 @@ public class ChronicleChannel extends BasicChannelSemantics {
             } catch (IOException e) {
                 throw new ChannelException("unable to create tmp tailer", e);
             }
-        }
-
-        @Override
-        protected void doRollback() throws InterruptedException {
-            throw new UnsupportedOperationException("not implemented yet");
         }
 
         @Override

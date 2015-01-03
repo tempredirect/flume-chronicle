@@ -8,7 +8,8 @@ import com.logicalpractice.flume.channel.chronicle.ChronicleChannel;
 import com.logicalpractice.flume.channel.chronicle.ChronicleChannelConfiguration;
 import org.apache.flume.Context;
 import org.apache.flume.Event;
-import org.apache.flume.event.EventBuilder;
+import org.apache.flume.event.EventBuilder
+import org.apache.flume.event.SimpleEvent;
 import org.apache.flume.lifecycle.LifecycleState;
 import org.junit.After;
 import org.junit.Before;
@@ -72,9 +73,7 @@ public class ChronicleChannelSpec extends Specification {
         then:
         // check the results
         result != null
-        input.getHeaders() == result.getHeaders()
-
-        Arrays.equals(input.getBody(), result.getBody());
+        assertEventsEqual(input, result)
     }
 
     def "Put And Take Multiple Transactions"() throws Exception {
@@ -151,8 +150,40 @@ public class ChronicleChannelSpec extends Specification {
         commitAndClose();
     }
 
+    def "put then rollback results in no available event"() {
+        given:
+        testObject.start()
+        def event = EventBuilder.withBody("should be rolled back".bytes)
+        checkCompleted(executor.invokeAll([new PutWithCommit(event)]))
+
+        when: "read and rollback"
+        begin()
+        def result = testObject.take()
+        rollbackAndClose()
+
+        then:
+        assertEventsEqual(event, result)
+
+        when: "read again"
+        begin()
+        result = testObject.take()
+        rollbackAndClose()
+
+        then: "we get the same event again"
+        assertEventsEqual(event, result)
+    }
+
+    def "take then rollback and the event is still available"() {
+
+    }
+
     private void commitAndClose() {
         testObject.getTransaction().commit();
+        testObject.getTransaction().close();
+    }
+
+    private void rollbackAndClose() {
+        testObject.getTransaction().rollback();
         testObject.getTransaction().close();
     }
 
@@ -171,7 +202,6 @@ public class ChronicleChannelSpec extends Specification {
             }
         }
     }
-
 
     private class Put implements Callable<Void> {
         private final Event event;
@@ -201,5 +231,9 @@ public class ChronicleChannelSpec extends Specification {
         }
     }
 
-
+    private static void assertEventsEqual(Event expected, Event result) {
+        assert result != null &&
+                expected.getHeaders() == result.getHeaders() &&
+                Arrays.equals(expected.getBody(), result.getBody());
+    }
 }
