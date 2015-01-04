@@ -72,7 +72,7 @@ public class ChronicleChannel extends BasicChannelSemantics {
         }
 
         position = new ChroniclePosition(path);
-        LOGGER.info("ChronicleChannel started, using path {}", path);
+        LOGGER.info("{} started, using path {}", getName(), path);
         super.start();
     }
 
@@ -84,6 +84,7 @@ public class ChronicleChannel extends BasicChannelSemantics {
             throw new ChannelException("Unable to close the chronicle instance", e);
         }
         super.stop();
+        LOGGER.info("{} stopped", getName());
     }
 
     @Override
@@ -248,18 +249,6 @@ public class ChronicleChannel extends BasicChannelSemantics {
                 return tmpTailer.nextIndex() && tmpTailer.index() == to;
             } catch (IOException e) {
                 throw new ChannelException("unable to create tmp tailer", e);
-            }
-        }
-
-        @Override
-        protected void doClose() {
-            if (appender != null) {
-                appender.close();
-                appender = null;
-            }
-            if (tailer != null) {
-                tailer.close();
-                tailer = null;
             }
         }
     }
