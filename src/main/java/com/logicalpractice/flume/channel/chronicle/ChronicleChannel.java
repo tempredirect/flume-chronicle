@@ -21,7 +21,6 @@ package com.logicalpractice.flume.channel.chronicle;
 import com.google.common.annotations.VisibleForTesting;
 import net.openhft.affinity.AffinitySupport;
 import net.openhft.chronicle.*;
-import org.apache.commons.io.IOUtils;
 import org.apache.flume.ChannelException;
 import org.apache.flume.Context;
 import org.apache.flume.Event;
@@ -37,6 +36,20 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * Flume NG Channel implementation backed by the OpenHFT Chronicle Queue.
+ *
+ * The channel protocol is controlled by a 4 byte header on each record.
+ *
+ * Excerpt:
+ *    4-byte control
+ *    Encoded FlumeEvent
+ *
+ * Control field values:
+ *   on put => - thread id
+ *   on commit => 0
+ *
+ *   on take => swapped for the consuming thread id
+ *   on commit => set to Integer.MAX_VALUE (0x7fffffff)
+ *
  */
 public class ChronicleChannel extends BasicChannelSemantics {
     private static Logger LOGGER = LoggerFactory.getLogger(ChronicleChannel.class);
@@ -110,9 +123,11 @@ public class ChronicleChannel extends BasicChannelSemantics {
 
         private final ChroniclePosition position;
         private TransactionType type = TransactionType.NONE;
-        private ExcerptAppender appender;
 
-        private List<Event> appendEvents = new ArrayList<Event>();
+        // note that the chronicle keeps WeakReference to the appender & tailer instances
+        // but in order to ensure that these don't get collected during a transaction we
+        // keep a hard reference to them
+        private ExcerptAppender appender;
         private ExcerptTailer tailer;
 
         public ChronicleChannelTransaction(Chronicle chronicle, ChroniclePosition position) {
@@ -175,27 +190,32 @@ public class ChronicleChannel extends BasicChannelSemantics {
         protected void doCommit() throws InterruptedException {
             switch (type) {
                 case PUT:
-                    doPutCommit();
+                    makeIndexesVisibleToTake();
                     break;
                 case TAKE:
-                    doTakeCommit();
+                    makeIndexesFlaggedAsConsumed();
                     break;
             }
         }
 
         @Override
         protected void doRollback() throws InterruptedException {
+            // note this is simply the reflection of the doCommit
             switch(type) {
                 case PUT:
-                    doTakeCommit();
+                    // rolling back puts is exactly the same effect as
+                    // them having been consumed by a take ... hence
+                    makeIndexesFlaggedAsConsumed();
                     break;
                 case TAKE:
-                    doPutCommit();
+                    // undoing a Take is just setting the control int to zero
+                    // which is exactly the logic for committing puts
+                    makeIndexesVisibleToTake();
                     break;
             }
         }
 
-        private void doPutCommit() {
+        private void makeIndexesVisibleToTake() {
             try (ExcerptTailer tailer = chronicle.createTailer()) {
                 for (int i = 0; i < indexes.size(); i ++) {
                     long index = indexes.get(i);
@@ -208,19 +228,24 @@ public class ChronicleChannel extends BasicChannelSemantics {
             }
         }
 
-        private void doTakeCommit() {
+        private void makeIndexesFlaggedAsConsumed() {
             long current, update;
-            do {
-                current = position.get();
-                update = current;
+            try (ExcerptTailer tailer = chronicle.createTailer()) {
+                do {
+                    current = position.get();
+                    update = current;
 
-                for (int i = 0; i < indexes.size(); i ++) {
-                    long index = indexes.get(i);
-                    if (sequentialIndexFrom(update, index)) {
-                        update = index;
+                    for (int i = 0; i < indexes.size(); i++) {
+                        long index = indexes.get(i);
+                        if (sequentialIndexFrom(update, index)) {
+                            update = index;
+                        }
+                        tailer.writeOrderedInt(0L, Integer.MAX_VALUE);
                     }
-                }
-            } while (!position.compareAndSwap(current, update));
+                } while (!position.compareAndSwap(current, update));
+            } catch (IOException e) {
+                throw new ChannelException(e);
+            }
         }
 
         private void becomeTransactionType(TransactionType newType) {
