@@ -1,31 +1,100 @@
 
-apply plugin: 'groovy'
-
-repositories {
-    jcenter()
-}
-
-sourceSets {
-    tools
-}
-
 ext.flumeVersion = '1.5.0'
 
-dependencies {
-    compile 'org.slf4j:slf4j-api:1.7.7'
-    compile "org.apache.flume:flume-ng-sdk:$flumeVersion"
-    compile "org.apache.flume:flume-ng-core:$flumeVersion"
-    compile "org.apache.flume:flume-ng-configuration:$flumeVersion"
-    compile "org.apache.flume:flume-ng-node:$flumeVersion"
-    compile 'net.openhft:chronicle:3.3.4'
+subprojects {
+  apply plugin: 'groovy'
 
-    testCompile 'junit:junit:4.11'
-    testCompile 'org.slf4j:slf4j-log4j12:1.7.7'
-    testCompile 'org.spockframework:spock-core:0.7-groovy-2.0'
+  repositories {
+      jcenter()
+  }
+}
 
-    toolsCompile sourceSets.main.output
-    toolsCompile configurations.runtime
-    // the following are only required for the tools
-    compile 'org.codehaus.groovy:groovy-all:2.4.0-rc-1'
-    compile 'net.sourceforge.argparse4j:argparse4j:0.4.4'
+project(':flume-chronicle-channel') {
+    dependencies {
+        compile 'org.slf4j:slf4j-api:1.7.7'
+        compile "org.apache.flume:flume-ng-sdk:$flumeVersion"
+        compile "org.apache.flume:flume-ng-core:$flumeVersion"
+        compile "org.apache.flume:flume-ng-configuration:$flumeVersion"
+        compile 'net.openhft:chronicle:3.3.4'
+
+        testCompile 'junit:junit:4.11'
+        testCompile 'org.slf4j:slf4j-log4j12:1.7.7'
+        testCompile 'org.spockframework:spock-core:0.7-groovy-2.0'
+
+        // the following are only required for the tools
+        compile 'org.codehaus.groovy:groovy-all:2.4.0-rc-1'
+        compile 'net.sourceforge.argparse4j:argparse4j:0.4.4'
+    }
+}
+project(':flume-chronicle-performance-cli') {
+    configurations { fatExecBootLoader }
+    dependencies {
+        compile 'org.slf4j:slf4j-api:1.7.7'
+        compile 'org.slf4j:slf4j-log4j12:1.7.7'
+        compile "org.apache.flume:flume-ng-node:$flumeVersion"
+        compile 'org.codehaus.groovy:groovy-all:2.4.0-rc-1'
+        compile 'net.sourceforge.argparse4j:argparse4j:0.4.4'
+
+        compile project(':flume-chronicle-channel')
+
+        testCompile 'junit:junit:4.11'
+        testCompile 'org.spockframework:spock-core:0.7-groovy-2.0'
+
+        fatExecBootLoader 'org.springframework.boot:spring-boot-loader:1.1.9.RELEASE'
+    }
+
+    task fatExecJar(type:Jar) {
+        description = "Build a single combined uber jar that is executable"
+        group = "Build"
+        classifier "fat"
+        dependsOn classes
+        destinationDir project.buildDir
+        archiveName project.name
+        entryCompression ZipEntryCompression.STORED
+
+        manifest {
+            attributes(
+                    'Main-Class' :'org.springframework.boot.loader.JarLauncher',
+                    'Start-Class':'com.logicalpractice.flume.channel.chronicle.tools.PerformanceTool'
+            )
+        }
+
+        from project.sourceSets.main.output
+        from(project.configurations.fatExecBootLoader.collect { project.zipTree(it) }) {
+            exclude 'META-INF/*'
+        }
+        into('lib') {
+            from project.configurations.runtime
+        }
+
+        // really executable jar
+        // http://skife.org/java/unix/2011/06/20/really_executable_jars.html
+        doLast {
+            def srcFile = project.file("${destinationDir}/${archiveName}")
+            def tmpFile = project.file(srcFile.getAbsolutePath() + ".tmp")
+
+            project.delete(tmpFile)
+
+            tmpFile << '''
+                        |JAVA_HOME="${JAVA_HOME:-/usr/java/latest}"
+                        |
+                        |if [ ! -e "${JAVA_HOME}/bin/java" ]; then
+                        |  if [ -e /usr/libexec/java_home ]; then
+                        |    JAVA_HOME="\$(/usr/libexec/java_home)"
+                        |  else
+                        |    echo "JAVA_HOME not set" >&2
+                        |    exit 1
+                        |  fi
+                        |fi
+                        |JAVA_OPTS="${JAVA_OPTS:--Xmx256m}"
+                        |exec $JAVA_HOME/bin/java $JAVA_OPTS -jar \$0 "\$@"
+                        |'''.stripMargin()
+
+            srcFile.withInputStream { is ->
+                tmpFile << is
+            }
+            tmpFile.setExecutable(true, true)
+            tmpFile.renameTo(srcFile)
+        }
+    }
 }

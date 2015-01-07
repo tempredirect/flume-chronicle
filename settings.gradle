@@ -1,2 +1,5 @@
 
-rootProject.name = 'flume-chronicle-channel'
+rootProject.name = 'flume-chronicle'
+include 'flume-chronicle-channel'
+include 'flume-chronicle-performance-cli'
+
