@@ -16,7 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-package com.logicalpractice.flume.channel.chronicle;
+package com.logicalpractice.flumechronicle.channel;
 
 public class ChronicleChannelConfiguration {
     public static final String PATH_KEY = "path";

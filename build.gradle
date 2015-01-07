@@ -55,7 +55,7 @@ project(':flume-chronicle-performance-cli') {
         manifest {
             attributes(
                     'Main-Class' :'org.springframework.boot.loader.JarLauncher',
-                    'Start-Class':'com.logicalpractice.flume.channel.chronicle.tools.PerformanceTool'
+                    'Start-Class':'com.logicalpractice.flumechronicle.performance.cli.PerformanceTool'
             )
         }
 
@@ -80,7 +80,7 @@ project(':flume-chronicle-performance-cli') {
                         |
                         |if [ ! -e "${JAVA_HOME}/bin/java" ]; then
                         |  if [ -e /usr/libexec/java_home ]; then
-                        |    JAVA_HOME="\$(/usr/libexec/java_home)"
+                        |    JAVA_HOME="$(/usr/libexec/java_home)"
                         |  else
                         |    echo "JAVA_HOME not set" >&2
                         |    exit 1

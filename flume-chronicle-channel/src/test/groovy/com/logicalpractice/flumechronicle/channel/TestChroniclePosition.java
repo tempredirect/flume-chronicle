@@ -1,7 +1,6 @@
-package com.logicalpractice.flume.channel.chronicle;
+package com.logicalpractice.flumechronicle.channel;
 
 import com.google.common.io.Files;
-import com.logicalpractice.flume.channel.chronicle.ChroniclePosition;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;

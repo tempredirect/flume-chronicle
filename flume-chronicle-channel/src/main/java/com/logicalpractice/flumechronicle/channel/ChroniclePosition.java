@@ -1,4 +1,4 @@
-package com.logicalpractice.flume.channel.chronicle;
+package com.logicalpractice.flumechronicle.channel;
 
 import net.openhft.lang.io.VanillaMappedBytes;
 import net.openhft.lang.io.VanillaMappedFile;

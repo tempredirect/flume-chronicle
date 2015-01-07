@@ -1,6 +1,5 @@
-package com.logicalpractice.flume.channel.chronicle;
+package com.logicalpractice.flumechronicle.channel;
 
-import com.logicalpractice.flume.channel.chronicle.ResizingLongArray;
 import org.junit.Test;
 
 import static org.junit.Assert.*;

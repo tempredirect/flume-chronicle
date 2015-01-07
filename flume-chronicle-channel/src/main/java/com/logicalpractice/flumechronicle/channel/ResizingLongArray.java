@@ -1,4 +1,4 @@
-package com.logicalpractice.flume.channel.chronicle;
+package com.logicalpractice.flumechronicle.channel;
 
 /**
  * Simple self resizing long array primitive.

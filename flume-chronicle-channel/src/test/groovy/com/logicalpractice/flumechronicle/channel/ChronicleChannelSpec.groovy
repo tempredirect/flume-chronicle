@@ -1,27 +1,16 @@
-package com.logicalpractice.flume.channel.chronicle;
+package com.logicalpractice.flumechronicle.channel;
 
 import com.google.common.base.Charsets;
 import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableMap;
-import com.google.common.io.Files;
-import com.logicalpractice.flume.channel.chronicle.ChronicleChannel;
-import com.logicalpractice.flume.channel.chronicle.ChronicleChannelConfiguration;
+import com.google.common.io.Files
 import org.apache.flume.Context;
 import org.apache.flume.Event;
 import org.apache.flume.event.EventBuilder
-import org.apache.flume.event.SimpleEvent;
-import org.apache.flume.lifecycle.LifecycleState;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test
-import spock.lang.Specification;
+import org.apache.flume.lifecycle.LifecycleState
+import spock.lang.Specification
 
-import java.io.File;
-import java.util.Arrays;
-import java.util.List;
-import java.util.concurrent.*;
-
-import static org.junit.Assert.*;
+import java.util.concurrent.*
 
 public class ChronicleChannelSpec extends Specification {
 

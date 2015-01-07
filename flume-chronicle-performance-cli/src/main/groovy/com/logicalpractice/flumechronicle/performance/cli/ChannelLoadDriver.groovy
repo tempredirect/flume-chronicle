@@ -1,4 +1,4 @@
-package com.logicalpractice.flume.channel.chronicle.tools
+package com.logicalpractice.flumechronicle.performance.cli
 
 import com.google.common.base.Supplier
 import groovy.transform.CompileStatic

@@ -1,7 +1,7 @@
-package com.logicalpractice.flume.channel.chronicle.tools
+package com.logicalpractice.flumechronicle.performance.cli
 
-import com.logicalpractice.flume.channel.chronicle.ChronicleChannel
-import com.logicalpractice.flume.channel.chronicle.ChronicleChannelConfiguration
+import com.logicalpractice.flumechronicle.channel.ChronicleChannel
+import com.logicalpractice.flumechronicle.channel.ChronicleChannelConfiguration
 import net.sourceforge.argparse4j.ArgumentParsers
 import net.sourceforge.argparse4j.inf.ArgumentParser
 import net.sourceforge.argparse4j.inf.Namespace
