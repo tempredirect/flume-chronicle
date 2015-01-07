@@ -20,10 +20,7 @@ package com.logicalpractice.flume.channel.chronicle;
 
 import com.google.common.annotations.VisibleForTesting;
 import net.openhft.affinity.AffinitySupport;
-import net.openhft.chronicle.Chronicle;
-import net.openhft.chronicle.ChronicleQueueBuilder;
-import net.openhft.chronicle.ExcerptAppender;
-import net.openhft.chronicle.ExcerptTailer;
+import net.openhft.chronicle.*;
 import org.apache.commons.io.IOUtils;
 import org.apache.flume.ChannelException;
 import org.apache.flume.Context;
@@ -238,7 +235,7 @@ public class ChronicleChannel extends BasicChannelSemantics {
             if ((from + 1) == to) {
                 return true;
             }
-            try (ExcerptTailer tmpTailer = chronicle.createTailer()) {
+            try (Excerpt tmpTailer = chronicle.createExcerpt()) {
                 if (tmpTailer.index(from)) {
                     // only if 'from' is valid and the nextIndex is
                     // the 'to'
