@@ -20,7 +20,7 @@ public class ChronicleChannelSpec extends Specification {
 
     def setup() throws Exception {
         File tempDir = Files.createTempDir();
-        testObject = new ChronicleChannel();
+        testObject = new ChronicleChannel(name:'chronicle-channel');
         testObject.configure(new Context(ImmutableMap.of(
                 ChronicleChannelConfiguration.PATH_KEY, tempDir.getCanonicalPath()
         )));
@@ -139,7 +139,7 @@ public class ChronicleChannelSpec extends Specification {
         commitAndClose();
     }
 
-    def "put then rollback results in no available event"() {
+    def "take then rollback, can be read on next take"() {
         given:
         testObject.start()
         def event = EventBuilder.withBody("should be rolled back".bytes)
@@ -160,10 +160,6 @@ public class ChronicleChannelSpec extends Specification {
 
         then: "we get the same event again"
         assertEventsEqual(event, result)
-    }
-
-    def "take then rollback and the event is still available"() {
-
     }
 
     private void commitAndClose() {
