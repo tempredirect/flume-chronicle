@@ -31,7 +31,7 @@ project(':flume-chronicle-channel') {
         compile "org.apache.flume:flume-ng-sdk:$flumeVersion"
         compile "org.apache.flume:flume-ng-core:$flumeVersion"
         compile "org.apache.flume:flume-ng-configuration:$flumeVersion"
-        compile 'net.openhft:chronicle:3.3.4'
+        compile 'net.openhft:chronicle:3.3.5'
 
         testCompile 'junit:junit:4.11'
         testCompile 'org.slf4j:slf4j-log4j12:1.7.7'

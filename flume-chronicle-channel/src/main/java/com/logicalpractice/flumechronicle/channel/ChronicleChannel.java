@@ -17,6 +17,7 @@
 package com.logicalpractice.flumechronicle.channel;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import net.openhft.affinity.AffinitySupport;
 import net.openhft.chronicle.*;
 import org.apache.flume.ChannelException;
@@ -24,11 +25,13 @@ import org.apache.flume.Context;
 import org.apache.flume.Event;
 import org.apache.flume.channel.BasicChannelSemantics;
 import org.apache.flume.channel.BasicTransactionSemantics;
+import org.mortbay.thread.ThreadPool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.File;
 import java.io.IOException;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -64,6 +67,10 @@ public class ChronicleChannel extends BasicChannelSemantics {
 
     private AtomicLong committedSize = new AtomicLong(0L);
 
+    private ScheduledExecutorService scheduledExecutorService;
+
+    private ScheduledFuture<?> cleanupFuture;
+
     @Override
     public void configure(Context context) {
         super.configure(context);
@@ -73,12 +80,14 @@ public class ChronicleChannel extends BasicChannelSemantics {
 
     @Override
     public synchronized void start() {
+        ChronicleQueueBuilder.VanillaChronicleQueueBuilder queueBuilder;
         try {
-            chronicle = ChronicleQueueBuilder
+            queueBuilder = ChronicleQueueBuilder
                     .vanilla(path)
                     .cycleFormat("yyyyMMDDHH")
-                    .cycleLength((int) TimeUnit.HOURS.toMillis(1))
-                    .build();
+                    .cycleLength((int) TimeUnit.HOURS.toMillis(1));
+
+            chronicle = queueBuilder.build();
         } catch (IOException e) {
             throw new ChannelException("Failed to start Chronicle instance", e);
         }
@@ -87,6 +96,17 @@ public class ChronicleChannel extends BasicChannelSemantics {
 
         performRecovery();
         LOGGER.info("{} started, using path {}", getName(), path);
+
+        ThreadFactory threadFactory = new ThreadFactoryBuilder()
+                .setDaemon(true)
+                .setNameFormat(getName() + "-cleanup-%s")
+                .build();
+
+        scheduledExecutorService = Executors.newScheduledThreadPool(1, threadFactory);
+        cleanupFuture = scheduledExecutorService.scheduleAtFixedRate(
+                new ChronicleCleanup(queueBuilder, new File(path), position),
+                1, 30, TimeUnit.MINUTES);
+
         super.start();
     }
 
@@ -136,7 +156,13 @@ public class ChronicleChannel extends BasicChannelSemantics {
             chronicle.close();
         } catch (IOException e) {
             throw new ChannelException("Unable to close the chronicle instance", e);
+        } finally {
+            if (cleanupFuture != null) {
+                cleanupFuture.cancel(false);
+                scheduledExecutorService.shutdown(); // it'll shutdown eventually
+            }
         }
+
         super.stop();
         LOGGER.info("{} stopped", getName());
     }
@@ -315,21 +341,21 @@ public class ChronicleChannel extends BasicChannelSemantics {
         }
     }
 
-        private static boolean sequentialIndexFrom(Chronicle chronicle, long from, long to) {
-            if ((from + 1) == to) {
-                return true;
-            }
-            try (Excerpt tmpTailer = chronicle.createExcerpt()) {
-                if (tmpTailer.index(from)) {
-                    // only if 'from' is valid and the nextIndex is
-                    // the 'to'
-                    return tmpTailer.nextIndex() && tmpTailer.index() == to;
-                }
-                // from isn't valid then 'to' could be the first element?
-                tmpTailer.toStart();
-                return tmpTailer.nextIndex() && tmpTailer.index() == to;
-            } catch (IOException e) {
-                throw new ChannelException("unable to create tmp tailer", e);
-            }
+    private static boolean sequentialIndexFrom(Chronicle chronicle, long from, long to) {
+        if ((from + 1) == to) {
+            return true;
         }
+        try (Excerpt tmpTailer = chronicle.createExcerpt()) {
+            if (tmpTailer.index(from)) {
+                // only if 'from' is valid and the nextIndex is
+                // the 'to'
+                return tmpTailer.nextIndex() && tmpTailer.index() == to;
+            }
+            // from isn't valid then 'to' could be the first element?
+            tmpTailer.toStart();
+            return tmpTailer.nextIndex() && tmpTailer.index() == to;
+        } catch (IOException e) {
+            throw new ChannelException("unable to create tmp tailer", e);
+        }
+    }
 }
