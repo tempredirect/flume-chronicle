@@ -18,26 +18,48 @@ package com.logicalpractice.flumechronicle.performance.cli
 
 import com.google.common.base.Supplier
 import groovy.transform.CompileStatic
+import groovy.util.logging.Slf4j
 import org.apache.flume.Channel
 import org.apache.flume.Event
+
+import java.util.concurrent.Callable
 
 /**
  */
 @CompileStatic
-class ChannelLoadDriver implements Runnable {
+@Slf4j
+class WriteLoadDriver implements Callable<Long> {
+
     Channel channel
     int count
+    int batchSize = 1
     Supplier<Event> eventSupplier
 
+
     @Override
-    void run() {
-        if (count > 0) {
-            count.times {
-                channel.getTransaction().begin()
-                channel.put(eventSupplier.get())
+    Long call() {
+        long sent = 0L
+        channel.getTransaction().begin()
+        int batch = 0
+        for (int i = 0; i < count; i++) {
+
+            def event = eventSupplier.get()
+            channel.put(event)
+            sent += event.getBody().length
+
+            batch += 1
+
+            if (batch % batchSize == 0) {
                 channel.getTransaction().commit()
                 channel.getTransaction().close()
+
+                channel.getTransaction().begin()
+                batch = 0
             }
         }
+        channel.getTransaction().commit()
+        channel.getTransaction().close()
+        log.info "writer finishing"
+        sent
     }
 }

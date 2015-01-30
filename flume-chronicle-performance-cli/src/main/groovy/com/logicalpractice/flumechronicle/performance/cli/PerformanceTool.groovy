@@ -30,8 +30,10 @@ import org.apache.flume.conf.Configurables
 import org.apache.flume.event.EventBuilder
 import org.apache.log4j.BasicConfigurator
 
+import java.util.concurrent.Executors
+
 /**
- * Created by gadavis on 04/01/2015.
+ *
  */
 class PerformanceTool {
 
@@ -44,7 +46,6 @@ class PerformanceTool {
                 .metavar("type")
                 .choices("file", "chronicle")
                 .setDefault("chronicle")
-                .required(true)
 
         parser.addArgument("--path")
                 .metavar("path")
@@ -52,8 +53,39 @@ class PerformanceTool {
 
         parser.addArgument("--event-count")
                 .metavar("amount")
-                .setDefault(-1)
+                .setDefault(50_000)
                 .type(Integer)
+
+        parser.addArgument("--writers")
+                .metavar("count")
+                .setDefault(1)
+                .type(Integer)
+
+        parser.addArgument("--writer-batch-size")
+                .metavar("size")
+                .setDefault(100)
+                .type(Integer)
+
+        parser.addArgument("--readers")
+                .metavar("count")
+                .setDefault(1)
+                .type(Integer)
+
+        parser.addArgument("--reader-batch-size")
+                .metavar("size")
+                .setDefault(100)
+                .type(Integer)
+
+        parser.addArgument("--warm-up")
+                .metavar("count")
+                .setDefault(1_000)
+                .type(Integer)
+                .help("number of events to be pushed though before running the test")
+
+        parser.addArgument("--body-size")
+                .metavar("bytes")
+                .setDefault(1024)
+                .help("size in bytes of the event body")
 
         Namespace ns = parser.parseArgsOrFail(args)
 
@@ -80,6 +112,7 @@ class PerformanceTool {
                 System.exit(1)
         }
 
+        def executor = Executors.newCachedThreadPool()
 
         FileUtils.deleteDirectory(path)
         path.mkdirs()
@@ -88,18 +121,59 @@ class PerformanceTool {
 
         channel.start()
 
-        ChannelLoadDriver driver = new ChannelLoadDriver(
-                channel: channel,
-                count: ns.getInt("event_count"),
-                eventSupplier: {EventBuilder.withBody("Some content".bytes)}
-        )
+        if (ns.getInt("warm_up") > 0) {
+            println "starting warmup"
+            executor.invokeAll([
+                    new WriteLoadDriver(
+                            channel: channel,
+                            count: ns.getInt("warm_up"),
+                            eventSupplier: { EventBuilder.withBody("Some content".bytes) }
+                    ),
+                    new ReadLoadDriver(
+                            channel: channel,
+                            count: ns.getInt("warm_up")
+                    )
+            ]).each { it.get() }
+
+            println "warmup done"
+        }
+
+        def tasks = []
+        def writers = ns.getInt("writers")
+        def readers = ns.getInt("readers")
+        def eventCount = ns.getInt("event_count")
+        def totalEventCount = eventCount * writers
+        def eventsPerReader = totalEventCount / readers
+        def readerCounts = [eventsPerReader] * readers
+        readerCounts[0] += totalEventCount % readers
+
+        tasks += (1..writers).collect {
+            new WriteLoadDriver(
+                    channel: channel,
+                    count: eventCount,
+                    eventSupplier: new EventSupplier(ns.getInt("body_size")),
+                    batchSize: ns.getInt("writer_batch_size")
+            )}
+
+        tasks += readerCounts.collect {
+            new ReadLoadDriver(
+                    channel: channel,
+                    count: it,
+                    batchSize: ns.getInt("reader_batch_size")
+            )}
+        println "starting run"
         def start = System.currentTimeMillis()
+        def end
         try {
-            driver.run()
+            executor.invokeAll(tasks).each { it.get() }
+            end = System.currentTimeMillis()
         } finally {
             channel.stop()
         }
         println "finished run"
-        println "time taken: ${System.currentTimeMillis() - start}ms"
+        println "time taken: ${end - start}ms totalEvents:$totalEventCount"
+
+
+        executor.shutdownNow()
     }
 }
