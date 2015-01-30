@@ -22,7 +22,7 @@ project(':flume-chronicle-channel') {
         testCompile 'org.spockframework:spock-core:0.7-groovy-2.0'
 
         // the following are only required for the tools
-        compile 'org.codehaus.groovy:groovy-all:2.4.0-rc-1'
+        compile 'org.codehaus.groovy:groovy-all:2.4.0'
         compile 'net.sourceforge.argparse4j:argparse4j:0.4.4'
     }
 }

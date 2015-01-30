@@ -4,6 +4,7 @@ import com.google.common.base.Charsets;
 import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.io.Files
+import org.apache.flume.Channel
 import org.apache.flume.Context;
 import org.apache.flume.Event;
 import org.apache.flume.event.EventBuilder
@@ -12,7 +13,7 @@ import spock.lang.Specification
 
 import java.util.concurrent.*
 
-public class ChronicleChannelSpec extends Specification {
+public class ChronicleChannelSpec extends Specification implements ChannelTransactionSupport {
 
     ChronicleChannel testObject;
 
@@ -63,6 +64,47 @@ public class ChronicleChannelSpec extends Specification {
         // check the results
         result != null
         assertEventsEqual(input, result)
+    }
+
+    def "Put increments the committed size"() throws Exception {
+        given:
+        Event input = EventBuilder.withBody("This is a Message", Charsets.UTF_8,
+                ImmutableMap.of("header1", "value1", "header2", "value2"));
+
+        testObject.start();
+
+        when:
+        // perform write
+        begin();
+        testObject.put(input);
+        commitAndClose();
+
+        then:
+        testObject.committedSize == 1
+    }
+
+    def "Take decrements the committed size"() throws Exception {
+        given:
+        Event input = EventBuilder.withBody("This is a Message", Charsets.UTF_8,
+                ImmutableMap.of("header1", "value1", "header2", "value2"));
+
+        testObject.start();
+        // perform write
+        begin();
+        testObject.put(input);
+        commitAndClose();
+
+        expect:
+        testObject.committedSize == 1
+
+        when:
+        // perform read
+        begin();
+        Event result = testObject.take();
+        commitAndClose();
+
+        then:
+        testObject.committedSize == 0
     }
 
     def "Put And Take Multiple Transactions"() throws Exception {
@@ -162,20 +204,6 @@ public class ChronicleChannelSpec extends Specification {
         assertEventsEqual(event, result)
     }
 
-    private void commitAndClose() {
-        testObject.getTransaction().commit();
-        testObject.getTransaction().close();
-    }
-
-    private void rollbackAndClose() {
-        testObject.getTransaction().rollback();
-        testObject.getTransaction().close();
-    }
-
-    private void begin() {
-        testObject.getTransaction().begin();
-    }
-
     private void checkCompleted(List<Future<Void>> futures) {
         for (Future<Void> future : futures) {
             try {
@@ -221,4 +249,16 @@ public class ChronicleChannelSpec extends Specification {
                 expected.getHeaders() == result.getHeaders() &&
                 Arrays.equals(expected.getBody(), result.getBody());
     }
+
+    void begin() {
+        begin(testObject)
+    }
+    void commitAndClose() {
+        commitAndClose(testObject)
+    }
+
+    void rollbackAndClose() {
+        rollbackAndClose(testObject)
+    }
+
 }

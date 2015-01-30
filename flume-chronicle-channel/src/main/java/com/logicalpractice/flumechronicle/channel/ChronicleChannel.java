@@ -31,6 +31,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Flume NG Channel implementation backed by the OpenHFT Chronicle Queue.
@@ -60,6 +61,8 @@ public class ChronicleChannel extends BasicChannelSemantics {
 
     private ChroniclePosition position;
 
+    private AtomicLong committedSize = new AtomicLong(0L);
+
     @Override
     public void configure(Context context) {
         super.configure(context);
@@ -80,8 +83,43 @@ public class ChronicleChannel extends BasicChannelSemantics {
         }
 
         position = new ChroniclePosition(path);
+
+        performRecovery();
         LOGGER.info("{} started, using path {}", getName(), path);
         super.start();
+    }
+
+    private void performRecovery() throws ChannelException {
+        // starting at the initial position read forward, finding any records that
+        //  - where mid put - these should be discarded (ie flagged as taken)
+        //  - taken but not committed - these should be reset
+        int putsDiscarded = 0, takesRecovered = 0;
+        try (ExcerptTailer tailer = chronicle.createTailer()) {
+            long initialPosition = position.get();
+            tailer.index(initialPosition);
+            while (tailer.nextIndex()) {
+                int control = tailer.readInt(0L);
+                if (control == 0) {
+                    committedSize.incrementAndGet();
+                } else
+                if (control < 0 && control > Integer.MIN_VALUE) {
+                    // is an un-committed put
+                    tailer.writeOrderedInt(0L, Integer.MAX_VALUE);
+                    putsDiscarded += 1;
+                } else
+                if (control > 0 && control < Integer.MAX_VALUE) {
+                    // is an un-committed take, put it back
+                    tailer.writeOrderedInt(0L, 0);
+                    takesRecovered += 1;
+                    committedSize.incrementAndGet();
+                }
+                // todo must work out if should move the position
+            }
+        } catch (IOException e) {
+            throw new ChannelException("Failed recovery", e);
+        }
+        LOGGER.info("recovery complete: committedSize={}, discarded={}, recovered={}",
+                committedSize.get(), putsDiscarded, takesRecovered);
     }
 
     @Override
@@ -97,7 +135,15 @@ public class ChronicleChannel extends BasicChannelSemantics {
 
     @Override
     protected BasicTransactionSemantics createTransaction() {
-        return new ChronicleChannelTransaction(chronicle, position);
+        return new ChronicleChannelTransaction(chronicle, position, committedSize);
+    }
+
+    /**
+     * The number of events that have been put and committed, but not taken.
+     * @return non negative long
+     */
+    public long getCommittedSize() {
+        return committedSize.get();
     }
 
     @VisibleForTesting
@@ -120,6 +166,8 @@ public class ChronicleChannel extends BasicChannelSemantics {
         private final Chronicle chronicle;
 
         private final ChroniclePosition position;
+        private final AtomicLong committedSize;
+
         private TransactionType type = TransactionType.NONE;
 
         // note that the chronicle keeps WeakReference to the appender & tailer instances
@@ -128,9 +176,10 @@ public class ChronicleChannel extends BasicChannelSemantics {
         private ExcerptAppender appender;
         private ExcerptTailer tailer;
 
-        public ChronicleChannelTransaction(Chronicle chronicle, ChroniclePosition position) {
+        public ChronicleChannelTransaction(Chronicle chronicle, ChroniclePosition position, AtomicLong committedSize) {
             this.chronicle = chronicle;
             this.position = position;
+            this.committedSize = committedSize;
         }
 
         @Override
@@ -189,9 +238,11 @@ public class ChronicleChannel extends BasicChannelSemantics {
             switch (type) {
                 case PUT:
                     makeIndexesVisibleToTake();
+                    committedSize.addAndGet(indexes.size());
                     break;
                 case TAKE:
                     makeIndexesFlaggedAsConsumed();
+                    committedSize.addAndGet(-indexes.size());
                     break;
             }
         }
