@@ -49,6 +49,9 @@ import java.util.concurrent.atomic.AtomicLong;
  *   on take => swapped for the consuming thread id
  *   on commit => set to Integer.MAX_VALUE (0x7fffffff)
  *
+ * The 'position' is a container for the last index for which there are no un-taken
+ * events. It is maintained on committing takes and shuffles forward as the channel
+ * is consumed.
  */
 public class ChronicleChannel extends BasicChannelSemantics {
     private static Logger LOGGER = LoggerFactory.getLogger(ChronicleChannel.class);
@@ -93,14 +96,20 @@ public class ChronicleChannel extends BasicChannelSemantics {
         // starting at the initial position read forward, finding any records that
         //  - where mid put - these should be discarded (ie flagged as taken)
         //  - taken but not committed - these should be reset
-        int putsDiscarded = 0, takesRecovered = 0;
+        // if we find a committed take (control == MAX_VALUE) and we are sequential from
+        // the current position, we must advance the position.
+        long putsDiscarded = 0, takesRecovered = 0, size = 0;
         try (ExcerptTailer tailer = chronicle.createTailer()) {
-            long initialPosition = position.get();
-            tailer.index(initialPosition);
+            long lastPosition = position.get();
+            tailer.index(lastPosition);
             while (tailer.nextIndex()) {
+                long currentPosition = tailer.index();
                 int control = tailer.readInt(0L);
                 if (control == 0) {
-                    committedSize.incrementAndGet();
+                    size += 1;
+                } else
+                if (control == Integer.MAX_VALUE && sequentialIndexFrom(chronicle, lastPosition, currentPosition)) {
+                    lastPosition = currentPosition;
                 } else
                 if (control < 0 && control > Integer.MIN_VALUE) {
                     // is an un-committed put
@@ -111,15 +120,16 @@ public class ChronicleChannel extends BasicChannelSemantics {
                     // is an un-committed take, put it back
                     tailer.writeOrderedInt(0L, 0);
                     takesRecovered += 1;
-                    committedSize.incrementAndGet();
+                    size += 1;
                 }
-                // todo must work out if should move the position
             }
+            position.set(lastPosition);
         } catch (IOException e) {
             throw new ChannelException("Failed recovery", e);
         }
         LOGGER.info("recovery complete: committedSize={}, discarded={}, recovered={}",
-                committedSize.get(), putsDiscarded, takesRecovered);
+                size, putsDiscarded, takesRecovered);
+        committedSize.set(size);
     }
 
     @Override
@@ -204,7 +214,7 @@ public class ChronicleChannel extends BasicChannelSemantics {
             int threadId = AffinitySupport.getThreadId();
             while (tailer.nextIndex()) {
                 if (tailer.compareAndSwapInt(0L, 0, threadId)) {
-                    tailer.position(4); // skip the lock field
+                    tailer.position(4); // skip the control field
                     indexes.add(tailer.index());
                     return EventBytes.readFrom(tailer);
                 }
@@ -286,9 +296,10 @@ public class ChronicleChannel extends BasicChannelSemantics {
 
                     for (int i = 0; i < indexes.size(); i++) {
                         long index = indexes.get(i);
-                        if (sequentialIndexFrom(update, index)) {
+                        if (sequentialIndexFrom(chronicle, update, index)) {
                             update = index;
                         }
+                        tailer.index(index); // move to the record then
                         tailer.writeOrderedInt(0L, Integer.MAX_VALUE);
                     }
                 } while (!position.compareAndSwap(current, update));
@@ -304,8 +315,9 @@ public class ChronicleChannel extends BasicChannelSemantics {
                 throw new IllegalStateException("Attempt to switch a " + type + " transaction into a " + newType);
             }
         }
+    }
 
-        private boolean sequentialIndexFrom(long from, long to) {
+        private static boolean sequentialIndexFrom(Chronicle chronicle, long from, long to) {
             if ((from + 1) == to) {
                 return true;
             }
@@ -322,5 +334,4 @@ public class ChronicleChannel extends BasicChannelSemantics {
                 throw new ChannelException("unable to create tmp tailer", e);
             }
         }
-    }
 }

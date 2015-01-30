@@ -28,6 +28,10 @@ public class ChroniclePosition {
         return bytes.compareAndSwapLong(0L, expect, update);
     }
 
+    public void set(long update) {
+        bytes.writeOrderedLong(0L, update);
+    }
+
     public void close() {
         bytes.close();
     }

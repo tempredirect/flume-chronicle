@@ -1,5 +1,7 @@
 package com.logicalpractice.flumechronicle.channel;
 
+import java.util.Arrays;
+
 /**
  * Simple self resizing long array primitive.
  */
@@ -32,5 +34,13 @@ class ResizingLongArray {
         }
         array[size] = value;
         size += 1;
+    }
+
+    @Override
+    public String toString() {
+        return "ResizingLongArray{" +
+                "size=" + size +
+                ", array=" + Arrays.toString(array) +
+                '}';
     }
 }

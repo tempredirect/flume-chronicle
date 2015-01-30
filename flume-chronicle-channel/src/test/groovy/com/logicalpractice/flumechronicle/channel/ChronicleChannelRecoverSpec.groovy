@@ -98,6 +98,30 @@ class ChronicleChannelRecoverSpec extends Specification implements ChannelTransa
         events.collect { new String(it.getBody(),Charsets.UTF_8)  }.every { it == "Event body" }
     }
 
+    def "Reopening with a reset position file"() {
+        given:
+        def channel = newChronicleChannel(tempDir)
+        begin(channel)
+        5.times { channel.put(EventBuilder.withBody("Event body", Charsets.UTF_8)) }
+        commitAndClose(channel)
+
+        when: "take 3, stop the channel and delete the position.dat"
+        begin(channel)
+        3.times { channel.take() }
+        commitAndClose(channel)
+        def previousPosition = channel.position.get()
+
+        channel.stop()
+
+        new File(tempDir, "position.dat").delete()
+
+        channel = newChronicleChannel(tempDir)
+
+        then:
+        channel.committedSize == 2L
+        channel.position.get() == previousPosition
+    }
+
     ChronicleChannel newChronicleChannel(File path) {
         def result = new ChronicleChannel(name:'chronicle-channel');
         result.configure(new Context(ImmutableMap.of(
