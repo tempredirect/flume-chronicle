@@ -22,7 +22,8 @@ import org.apache.flume.Channel
 import org.apache.flume.Event;
 
 import java.util.concurrent.Callable
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.locks.LockSupport;
 
 /**
  *
@@ -46,8 +47,9 @@ class ReadLoadDriver implements Callable<Long> {
             while (event == null) {
                 event = channel.take()
                 spinCount ++
-                if (spinCount > 1_000) {
-                    log.warn "seem to be stuck waiting for events"
+                if (spinCount > 1_000_000) {
+                    TimeUnit.MILLISECONDS.sleep(1)
+//                    log.warn "seem to be stuck waiting for events"
                     spinCount = 0
                 }
             }

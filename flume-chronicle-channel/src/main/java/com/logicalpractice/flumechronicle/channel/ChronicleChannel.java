@@ -25,7 +25,6 @@ import org.apache.flume.Context;
 import org.apache.flume.Event;
 import org.apache.flume.channel.BasicChannelSemantics;
 import org.apache.flume.channel.BasicTransactionSemantics;
-import org.mortbay.thread.ThreadPool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -360,23 +359,28 @@ public class ChronicleChannel extends BasicChannelSemantics {
         }
 
         private void makeIndexesFlaggedAsConsumed() {
-            long current, update;
-            do {
-                update = current = position.get();
+            // first mark all the 'indexes' records as consumed
+            for (int i = 0; i < indexes.size(); i++) {
+                long index = indexes.get(i);
+                toIndex(index); // move to the record then, flag it as consumed
+                tailer.writeOrderedInt(0L, Integer.MAX_VALUE);
+            }
 
-                for (int i = 0; i < indexes.size(); i++) {
-                    long index = indexes.get(i);
-                    if (sequentialIndexFrom(chronicle, update, index)) {
-                        update = index;
-                    } else {
-                        if (LOGGER.isTraceEnabled())
-                            LOGGER.trace("makeIndexesFlaggedAsConsumed not sequential update pos={}, index={}",
-                                    update, index);
-                    }
-                    toIndex(index); // move to the record then, flag it as consumed
-                    tailer.writeOrderedInt(0L, Integer.MAX_VALUE);
-                }
-            } while (!position.compareAndSwap(current, update));
+            // now advance position by as much as we can by scanning the control flags
+            // after the current position, we stop at the first that isn't MAX_VALUE
+
+            long initialPosition = position.get();
+            long lastPosition = initialPosition;
+
+            toIndex(initialPosition);
+            while(tailer.nextIndex() && tailer.readInt(0L) == Integer.MAX_VALUE) {
+                lastPosition = tailer.index();
+            }
+            if (lastPosition != initialPosition) {
+                // no need to redo the work on fail as the next commit will fix
+                // any gap
+                position.compareAndSwap(initialPosition, lastPosition);
+            }
         }
 
         private void becomeTransactionType(TransactionType newType) {
