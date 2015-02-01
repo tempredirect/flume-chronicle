@@ -220,6 +220,56 @@ public class ChronicleChannelSpec extends Specification implements ChannelTransa
         assertEventsEqual(event, result)
     }
 
+    def "take adjusts the position on commit"() {
+        given:
+        testObject.start()
+        def event = EventBuilder.withBody("should be rolled back".bytes)
+        begin()
+        10.times { testObject.put(event) }
+        commitAndClose()
+
+        begin()
+        testObject.take()
+        commitAndClose()
+
+        expect:
+        testObject.position.get() != 0
+
+        when: "read another record"
+        def savedPosition = testObject.position.get()
+        begin()
+        testObject.take()
+        commitAndClose()
+
+        then:
+        testObject.position.get() == savedPosition + 1
+    }
+
+    def "take adjusts the position on taking many"() {
+        given:
+        testObject.start()
+        def event = EventBuilder.withBody("should be rolled back".bytes)
+        begin()
+        10.times { testObject.put(event) }
+        commitAndClose()
+
+        begin()
+        testObject.take()
+        commitAndClose()
+
+        expect:
+        testObject.position.get() != 0
+
+        when: "read another record"
+        def savedPosition = testObject.position.get()
+        begin()
+        5.times { testObject.take() }
+        commitAndClose()
+
+        then:
+        testObject.position.get() == savedPosition + 5
+    }
+
     private void checkCompleted(List<Future<Void>> futures) {
         for (Future<Void> future : futures) {
             try {

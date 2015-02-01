@@ -18,7 +18,8 @@ package com.logicalpractice.flumechronicle.performance.cli
 
 import groovy.transform.CompileStatic
 import groovy.util.logging.Slf4j;
-import org.apache.flume.Channel;
+import org.apache.flume.Channel
+import org.apache.flume.Event;
 
 import java.util.concurrent.Callable
 import java.util.concurrent.TimeUnit;
@@ -37,26 +38,25 @@ class ReadLoadDriver implements Callable<Long> {
     @Override
     public Long call() throws Exception {
         long received = 0L
-        def event
         channel.getTransaction().begin()
-        int batch = 0
 
-        for (int i = 0; i < count; i++) {
-            for (;;) {
+        for (int i = 1; i <= count; i++) {
+            Event event = null
+            int spinCount = 0;
+            while (event == null) {
                 event = channel.take()
-                if (event != null) {
-                    break
+                spinCount ++
+                if (spinCount > 1_000) {
+                    log.warn "seem to be stuck waiting for events"
+                    spinCount = 0
                 }
-                TimeUnit.MILLISECONDS.sleep(1) // back off a wee bit
             }
             received += event.getBody().length
-            batch += 1
-            if ((batch % batchSize) == 0) {
+            if ((i % batchSize) == 0) {
                 channel.getTransaction().commit()
                 channel.getTransaction().close()
 
                 channel.getTransaction().begin()
-                batch = 0
             }
         }
         channel.getTransaction().commit()

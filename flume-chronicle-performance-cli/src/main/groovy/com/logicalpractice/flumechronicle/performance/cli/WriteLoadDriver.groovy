@@ -41,25 +41,29 @@ class WriteLoadDriver implements Callable<Long> {
         long sent = 0L
         channel.getTransaction().begin()
         int batch = 0
-        for (int i = 0; i < count; i++) {
+        try {
+            for (int i = 0; i < count; i++) {
 
-            def event = eventSupplier.get()
-            channel.put(event)
-            sent += event.getBody().length
+                def event = eventSupplier.get()
+                channel.put(event)
+                sent += event.getBody().length
 
-            batch += 1
+                batch += 1
 
-            if (batch % batchSize == 0) {
-                channel.getTransaction().commit()
-                channel.getTransaction().close()
+                if (batch % batchSize == 0) {
+                    channel.getTransaction().commit()
+                    channel.getTransaction().close()
 
-                channel.getTransaction().begin()
-                batch = 0
+                    channel.getTransaction().begin()
+                    batch = 0
+                }
             }
+            channel.getTransaction().commit()
+            channel.getTransaction().close()
+            log.info "writer finishing"
+        } catch (Exception e) {
+            log.error "failure", e
         }
-        channel.getTransaction().commit()
-        channel.getTransaction().close()
-        log.info "writer finishing"
         sent
     }
 }

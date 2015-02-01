@@ -195,6 +195,7 @@ public class ChronicleChannel extends BasicChannelSemantics {
     }
 
     private static class ChronicleChannelTransaction extends BasicTransactionSemantics {
+
         private final ResizingLongArray indexes = new ResizingLongArray(64);
 
         private final Chronicle chronicle;
@@ -236,24 +237,69 @@ public class ChronicleChannel extends BasicChannelSemantics {
             initialiseTailerIfRequired();
 
             int threadId = AffinitySupport.getThreadId();
+            long firstPos = tailer.index(); // could be 0
+            long scans = 0L;
+
+            // first loop... from current pos until end
+            // hopefully this is the normal fast case.
             while (tailer.nextIndex()) {
-                if (tailer.compareAndSwapInt(0L, 0, threadId)) {
-                    tailer.position(4); // skip the control field
-                    indexes.add(tailer.index());
+                scans += 1;
+                if (acquireRecord(threadId)) {
                     return EventBytes.readFrom(tailer);
                 }
             }
+
+            // else from position to firstPos.. this is the exhaustive step
+            // to make sure we scan all possible locations
+            for(
+                toIndex(position.get()); /* reset to earliest available */
+                tailer.index() < firstPos; /* while still before firstPos */
+                tailer.nextIndex()
+            ) {
+                scans += 1;
+                if (acquireRecord(threadId)) {
+                    return EventBytes.readFrom(tailer);
+                }
+            }
+            // nope .. reset the tailer to position, ready for next time
+            toIndex(position.get());
+
+            if (LOGGER.isTraceEnabled())
+                LOGGER.trace("doTake() - null, threadId={}, firstPos={}, position={}, scans={}, committedSize={}",
+                        threadId, firstPos, position.get(), scans, committedSize.get());
             return null;
+        }
+
+        private boolean acquireRecord(int threadId) {
+            if (tailer.compareAndSwapInt(0L, 0, threadId)) {
+                if (LOGGER.isTraceEnabled())
+                    LOGGER.trace("doTake() - {}, threadId={}", tailer.index(), threadId);
+                indexes.add(tailer.index());
+                tailer.position(4); // skip the control field ready for the read of payload
+                return true;
+            }
+            return false;
         }
 
         private void initialiseTailerIfRequired() {
             if (tailer == null) {
                 try {
                     tailer = chronicle.createTailer();
-                    tailer.index(position.get()); // fast forward to last known safe position
+                    toIndex(position.get()); // fast forward to last known safe position
                 } catch (IOException e) {
                     throw new ChannelException("unable to create new Tailer", e);
                 }
+            }
+        }
+
+        private void toIndex(long index) {
+            if (index > 0) {
+                boolean success = tailer.index(index);
+                if (!success) {
+                    throw new ChannelException("Unable to navigate to " + index);
+                }
+            } else {
+                tailer.toStart();
             }
         }
 
@@ -268,21 +314,23 @@ public class ChronicleChannel extends BasicChannelSemantics {
         }
 
         @Override
-        protected void doCommit() throws InterruptedException {
+        protected synchronized void doCommit() throws InterruptedException {
             switch (type) {
                 case PUT:
                     makeIndexesVisibleToTake();
                     committedSize.addAndGet(indexes.size());
                     break;
                 case TAKE:
+                    long currentPosition = position.get();
                     makeIndexesFlaggedAsConsumed();
                     committedSize.addAndGet(-indexes.size());
+                    LOGGER.debug("takeCommitted pos:{} => {}, size={}", currentPosition, position.get(), committedSize.get());
                     break;
             }
         }
 
         @Override
-        protected void doRollback() throws InterruptedException {
+        protected synchronized void doRollback() throws InterruptedException {
             // note this is simply the reflection of the doCommit
             switch(type) {
                 case PUT:
@@ -313,23 +361,22 @@ public class ChronicleChannel extends BasicChannelSemantics {
 
         private void makeIndexesFlaggedAsConsumed() {
             long current, update;
-            try (ExcerptTailer tailer = chronicle.createTailer()) {
-                do {
-                    current = position.get();
-                    update = current;
+            do {
+                update = current = position.get();
 
-                    for (int i = 0; i < indexes.size(); i++) {
-                        long index = indexes.get(i);
-                        if (sequentialIndexFrom(chronicle, update, index)) {
-                            update = index;
-                        }
-                        tailer.index(index); // move to the record then
-                        tailer.writeOrderedInt(0L, Integer.MAX_VALUE);
+                for (int i = 0; i < indexes.size(); i++) {
+                    long index = indexes.get(i);
+                    if (sequentialIndexFrom(chronicle, update, index)) {
+                        update = index;
+                    } else {
+                        if (LOGGER.isTraceEnabled())
+                            LOGGER.trace("makeIndexesFlaggedAsConsumed not sequential update pos={}, index={}",
+                                    update, index);
                     }
-                } while (!position.compareAndSwap(current, update));
-            } catch (IOException e) {
-                throw new ChannelException(e);
-            }
+                    toIndex(index); // move to the record then, flag it as consumed
+                    tailer.writeOrderedInt(0L, Integer.MAX_VALUE);
+                }
+            } while (!position.compareAndSwap(current, update));
         }
 
         private void becomeTransactionType(TransactionType newType) {
@@ -351,6 +398,7 @@ public class ChronicleChannel extends BasicChannelSemantics {
                 // the 'to'
                 return tmpTailer.nextIndex() && tmpTailer.index() == to;
             }
+            LOGGER.info("first element consumed?");
             // from isn't valid then 'to' could be the first element?
             tmpTailer.toStart();
             return tmpTailer.nextIndex() && tmpTailer.index() == to;

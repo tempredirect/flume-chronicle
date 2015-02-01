@@ -24,13 +24,16 @@ import net.sourceforge.argparse4j.inf.Namespace
 import org.apache.commons.io.FileUtils
 import org.apache.flume.Channel
 import org.apache.flume.Context
+import org.apache.flume.channel.MemoryChannel
 import org.apache.flume.channel.file.FileChannel
 import org.apache.flume.channel.file.FileChannelConfiguration
 import org.apache.flume.conf.Configurables
 import org.apache.flume.event.EventBuilder
 import org.apache.log4j.BasicConfigurator
+import org.apache.log4j.Level
 
 import java.util.concurrent.Executors
+import org.apache.log4j.Logger;
 
 /**
  *
@@ -39,12 +42,14 @@ class PerformanceTool {
 
     public static void main(String[] args) {
         BasicConfigurator.configure()
+        Logger.getRootLogger().setLevel(Level.WARN);
+        Logger.getLogger(PerformanceTool.package.name).setLevel(Level.INFO)
 
         ArgumentParser parser = ArgumentParsers.newArgumentParser("performance-tool")
 
         parser.addArgument("--channel-type")
                 .metavar("type")
-                .choices("file", "chronicle")
+                .choices("file", "chronicle", "memory")
                 .setDefault("chronicle")
 
         parser.addArgument("--path")
@@ -87,7 +92,15 @@ class PerformanceTool {
                 .setDefault(1024)
                 .help("size in bytes of the event body")
 
+        parser.addArgument("--log-level")
+                .metavar("level")
+                .choices("trace", "debug", "info", "warn", "error")
+
         Namespace ns = parser.parseArgsOrFail(args)
+
+        if (ns.getString("log_level")) {
+            Logger.getRootLogger().setLevel(Level.toLevel(ns.getString("log_level")))
+        }
 
         Context channelContext = new Context()
         Channel channel
@@ -106,6 +119,11 @@ class PerformanceTool {
                 channelContext.put(ChronicleChannelConfiguration.PATH_KEY, path.absolutePath)
                 channel = new ChronicleChannel()
                 channel.setName("chronicleChannel")
+                break
+            case "memory":
+                channelContext.put("capacity", "10000")
+                channel = new MemoryChannel()
+                channel.setName("memoryChannel")
                 break
             default:
                 System.out.println("Unknown channel-type: $type")

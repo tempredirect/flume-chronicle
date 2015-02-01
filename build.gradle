@@ -47,8 +47,10 @@ project(':flume-chronicle-performance-cli') {
     dependencies {
         compile 'org.slf4j:slf4j-api:1.7.7'
         compile 'org.slf4j:slf4j-log4j12:1.7.7'
-        compile "org.apache.flume:flume-ng-node:$flumeVersion"
-        compile 'org.codehaus.groovy:groovy-all:2.4.0-rc-1'
+        compile("org.apache.flume:flume-ng-node:$flumeVersion") {
+            exclude module:'slf4j-log4j12'
+        }
+        compile 'org.codehaus.groovy:groovy-all:2.4.0'
         compile 'net.sourceforge.argparse4j:argparse4j:0.4.4'
 
         compile project(':flume-chronicle-channel')
