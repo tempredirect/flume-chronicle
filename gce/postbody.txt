@@ -1,0 +1,1 @@
+[{"headers": {"timestamp":"1423337506913", "hostname":"server1.example.com"},"body": "15/02/07 18:50:11 INFO instrumentation.MonitoredCounterGroup: Monitored counter group for type: SOURCE, name: http: Successfully registered new MBean."}]
