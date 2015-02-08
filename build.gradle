@@ -14,6 +14,14 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+buildscript {
+    repositories {
+        jcenter()
+    }
+    dependencies {
+        classpath 'com.jfrog.bintray.gradle:gradle-bintray-plugin:1.0'
+    }
+}
 
 ext.flumeVersion = '1.5.0'
 
@@ -26,6 +34,9 @@ subprojects {
 }
 
 project(':flume-chronicle-channel') {
+    apply plugin:'maven-publish'
+    apply plugin: 'com.jfrog.bintray'
+
     dependencies {
         compile 'org.slf4j:slf4j-api:1.7.7'
         compile "org.apache.flume:flume-ng-sdk:$flumeVersion"
@@ -41,7 +52,57 @@ project(':flume-chronicle-channel') {
         compile 'org.codehaus.groovy:groovy-all:2.4.0'
         compile 'net.sourceforge.argparse4j:argparse4j:0.4.4'
     }
+    // custom tasks for creating source/javadoc jars
+    task sourcesJar(type: Jar, dependsOn: classes) {
+        classifier = 'sources'
+        from sourceSets.main.allSource
+    }
+
+    task javadocJar(type: Jar, dependsOn: javadoc) {
+        classifier = 'javadoc'
+        from javadoc.destinationDir
+    }
+
+    // add javadoc/source jar tasks as artifacts
+    artifacts {
+        archives sourcesJar, javadocJar
+    }
+
+    publishing {
+        publications {
+            mavenJava(MavenPublication) {
+                from components.java
+
+                artifact sourcesJar
+                artifact javadocJar
+            }
+        }
+    }
+    bintray {
+        user = property('bintray_user')
+        key = property('bintray_api_key')
+
+        publications = ['mavenJava']
+
+        pkg {
+            repo = 'maven'
+            name = 'flume-chronicle'
+            desc = 'what a fantastic package indeed!'
+            websiteUrl = 'https://github.com/tempredirect/flume-chronicle'
+            issueTrackerUrl = 'https://github.com/tempredirect/flume-chronicle/issues'
+            vcsUrl = 'https://github.com/tempredirect/flume-chronicle.git'
+            licenses = ['Apache-2.0']
+            labels = ['flume']
+            publicDownloadNumbers = true
+            version {
+                mavenCentralSync {
+                    sync = false
+                }
+            }
+        }
+    }
 }
+
 project(':flume-chronicle-performance-cli') {
     configurations { fatExecBootLoader }
     dependencies {
@@ -116,3 +177,4 @@ project(':flume-chronicle-performance-cli') {
         }
     }
 }
+
