@@ -19,6 +19,7 @@ package com.logicalpractice.flumechronicle.performance.cli
 import com.logicalpractice.flumechronicle.channel.ChronicleChannel
 import com.logicalpractice.flumechronicle.channel.ChronicleChannelConfiguration
 import net.sourceforge.argparse4j.ArgumentParsers
+import net.sourceforge.argparse4j.impl.Arguments
 import net.sourceforge.argparse4j.inf.ArgumentParser
 import net.sourceforge.argparse4j.inf.Namespace
 import org.apache.commons.io.FileUtils
@@ -33,7 +34,9 @@ import org.apache.log4j.BasicConfigurator
 import org.apache.log4j.Level
 
 import java.util.concurrent.Executors
-import org.apache.log4j.Logger;
+import org.apache.log4j.Logger
+
+import java.util.concurrent.TimeUnit;
 
 /**
  *
@@ -96,6 +99,10 @@ class PerformanceTool {
                 .metavar("level")
                 .choices("trace", "debug", "info", "warn", "error")
 
+        parser.addArgument("--channel-param")
+                .action(Arguments.append())
+                .help("optional configuration parameter for the channel")
+
         Namespace ns = parser.parseArgsOrFail(args)
 
         if (ns.getString("log_level")) {
@@ -103,6 +110,7 @@ class PerformanceTool {
         }
 
         Context channelContext = new Context()
+
         Channel channel
 
         def type = ns.getString("channel_type")
@@ -112,6 +120,7 @@ class PerformanceTool {
             case "file":
                 channelContext.put(FileChannelConfiguration.DATA_DIRS, new File(path, "data").absolutePath)
                 channelContext.put(FileChannelConfiguration.CHECKPOINT_DIR, new File(path, "checkpoint").absolutePath)
+                channelContext.put(FileChannelConfiguration.FSYNC_PER_TXN, "false")
                 channel = new FileChannel()
                 channel.setName("fileChannel")
                 break
@@ -128,12 +137,15 @@ class PerformanceTool {
             default:
                 System.out.println("Unknown channel-type: $type")
                 System.exit(1)
+                throw new AssertionError()
         }
 
         def executor = Executors.newCachedThreadPool()
 
         FileUtils.deleteDirectory(path)
         path.mkdirs()
+
+        applyChannelParams(channelContext, ns)
 
         Configurables.configure(channel, channelContext)
 
@@ -180,18 +192,38 @@ class PerformanceTool {
                     batchSize: ns.getInt("reader_batch_size")
             )}
         println "starting run"
-        def start = System.currentTimeMillis()
-        def end
+        def start = System.nanoTime()
+        def end = 0L
         try {
             executor.invokeAll(tasks).each { it.get() }
-            end = System.currentTimeMillis()
+            end = System.nanoTime()
         } finally {
             channel.stop()
         }
+
         println "finished run"
-        println "time taken: ${end - start}ms totalEvents:$totalEventCount"
+
+        def runTime = end - start
+        def perEvent = runTime / totalEventCount
+
+        println "time taken: ${TimeUnit.NANOSECONDS.toMillis(runTime)}ms totalEvents:$totalEventCount"
+        println "per event: ${perEvent}ns "
 
 
         executor.shutdownNow()
+    }
+
+    private static List applyChannelParams(Context channelContext, Namespace ns) {
+        def params = ns.getList("channel_param")
+        if (params) {
+            params.each { String value ->
+                def parts = value.split(/=/)
+                if (parts.length == 2) {
+                    channelContext.put(parts[0], parts[1])
+                } else {
+                    throw new IllegalArgumentException("invalid argument '$value'")
+                }
+            }
+        }
     }
 }
